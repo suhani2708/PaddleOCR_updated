@@ -1,39 +1,39 @@
-
 # -*- coding: utf-8 -*-
+"""
+CRITICAL: Set Tesseract path BEFORE importing/using pytesseract functions
+"""
 import pytesseract
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
 from PIL import Image
 import pandas as pd
 import os
+import sys
 from openpyxl import Workbook
 from openpyxl.styles import Font
-from openpyxl.utils.dataframe import dataframe_to_rows
 
 def validate_and_normalize_path(image_path):
     """Validate and normalize the image path"""
     if not image_path:
         raise ValueError("Image path cannot be empty")
 
-    # Convert to absolute path if relative
     if not os.path.isabs(image_path):
-        image_path = os.path.join(os.path.dirname(__file__), image_path)
+        image_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), image_path)
 
-    # Check if file exists
     if not os.path.exists(image_path):
-        raise FileNotFoundError(f"Image not found: {image_path}")
-
+        raise FileNotFoundError(f"Image not found at: {image_path}\n"
+                              f"Current working directory: {os.getcwd()}\n"
+                              f"Full resolved path: {os.path.abspath(image_path)}")
     return image_path
 
 # --- IMAGE PATH ---
-image_path = 'docs/images/Statista-FormF-RKJJ-NA-1929751_d.jpg'  # Changed to relative path
+image_path = 'docs/images/Statista-FormF-RKJJ-NA-1929751_d.jpg'
 
 try:
     image_path = validate_and_normalize_path(image_path)
-except FileNotFoundError as e:
-    print(f"Error: {e}")
-    exit(1)
-except ValueError as e:
-    print(f"Error: {e}")
-    exit(1)
+except (FileNotFoundError, ValueError) as e:
+    print(f"ERROR: {e}")
+    sys.exit(1)
 
 print("Loading and preprocessing image...")
 
@@ -44,13 +44,13 @@ img = img.point(lambda x: 0 if x < 128 else 255, '1')  # Binarize
 img = img.resize((img.width * 2, img.height * 2), Image.LANCZOS)  # Upscale 2x
 
 # --- GET FULL TEXT LINES (for grouping) ---
-text = pytesseract.image_to_string(img)
+text = pytesseract.image_to_string(img, lang='eng')
 lines = [line.strip() for line in text.splitlines() if line.strip()]
 
 if not lines:
     raise ValueError("No text detected in the image.")
 
-print(f" Total non-empty lines detected: {len(lines)}")
+print(f"✓ Total non-empty lines detected: {len(lines)}")
 
 # --- GROUP LINES IN CHUNKS OF 4 ---
 chunk_size = 4
@@ -62,54 +62,44 @@ for i in range(0, len(lines), chunk_size):
         words_in_group.extend(line.split())
     groups.append(words_in_group)
 
-print(f"\nCreated {len(groups)} groups (each = up to 4 lines)")
+print(f"\n✓ Created {len(groups)} groups (each = up to {chunk_size} lines)")
 
 # --- PAD TO MAX LENGTH ---
 max_len = max(len(g) for g in groups) if groups else 0
 padded_groups = [g + [''] * (max_len - len(g)) for g in groups]
 
-# --- CREATE DATAFRAME (for structure only) ---
-df = pd.DataFrame(padded_groups)
+# --- GET WORD-LEVEL CONFIDENCE ---
+print("Running OCR with word-level confidence data...")
+data = pytesseract.image_to_data(img, lang='eng', output_type=pytesseract.Output.DICT)
 
-# --- NOW, GET WORD-LEVEL CONFIDENCE TO KNOW WHICH WORDS TO HIGHLIGHT ---
-print("Running OCR with word-level data for confidence...")
-data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
-
-# Build a list of words with their confidence, in reading order
-ocr_words_with_conf = []
+# Build word-confidence mapping
+word_confidences = []
 n_boxes = len(data['level'])
 for i in range(n_boxes):
     conf = int(data['conf'][i])
     text_word = data['text'][i].strip()
     if conf >= 0 and text_word:
-        ocr_words_with_conf.append((text_word, conf))
+        word_confidences.append((text_word, conf))
 
-# Flatten all words from groups (same order as in df)
+# Flatten all words from groups
 all_words_in_order = []
 for group in padded_groups:
     for word in group:
-        if word != '':
+        if word:
             all_words_in_order.append(word)
 
-# Map each word in `all_words_in_order` to its confidence
-# Since Tesseract may split/merge differently, we match by position (approximate)
+# Map words to confidence (position-based)
 word_conf_map = {}
-min_len = min(len(all_words_in_order), len(ocr_words_with_conf))
-for i in range(min_len):
-    word_from_group = all_words_in_order[i]
-    word_from_ocr, conf = ocr_words_with_conf[i]
-    # Even if text differs slightly, we assign confidence by position
-    word_conf_map[word_from_group] = conf
-
-# For safety, if lengths differ, remaining words get conf = 0
-for i in range(min_len, len(all_words_in_order)):
-    word_conf_map[all_words_in_order[i]] = 0
+for i, word in enumerate(all_words_in_order):
+    if i < len(word_confidences):
+        word_conf_map[word] = word_confidences[i][1]
+    else:
+        word_conf_map[word] = 0
 
 # --- CREATE EXCEL WITH HIGHLIGHTING ---
 wb = Workbook()
 ws = wb.active
-
-red_font = Font(color="FF0000")  # Red color
+red_font = Font(color="FF0000")
 
 # Write rows with conditional formatting
 for row_idx, row in enumerate(padded_groups, start=1):
@@ -122,6 +112,6 @@ for row_idx, row in enumerate(padded_groups, start=1):
 output_excel = 'merged_4lines_per_row_highlighted.xlsx'
 wb.save(output_excel)
 
-print(f"\n Saved {len(groups)} rows to: {output_excel}")
-print(f"   Shape: {len(groups)} rows × {max_len} columns")
-print("    Words with confidence < 99% are highlighted in RED.")
+print(f"\n✓ Saved {len(groups)} rows to: {output_excel}")
+print(f"  Shape: {len(groups)} rows × {max_len} columns")
+print("  Words with confidence < 99% are highlighted in RED.")
