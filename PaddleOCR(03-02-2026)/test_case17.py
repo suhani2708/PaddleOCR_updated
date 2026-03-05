@@ -112,6 +112,6 @@ def extract_to_excel(image_path, output_xlsx):
     print(f"✅ Success! Data saved with tiered highlights to {output_xlsx}")
 
 if __name__ == "__main__":
-    IMAGE_PATH = r"C:\Users\91909\Desktop\github new repository\new repo\ftb(30-12-2025)\PaddleOCR_updated\PaddleOCR(03-02-2026)\docs\images\Statista-FormF-RKJJ-NA-1929755_d----parth.jpg" # Update this with your actual image path
+    IMAGE_PATH = r"C:\Users\91909\Desktop\github new repository\new repo\ftb(30-12-2025)\PaddleOCR_updated\PaddleOCR(03-02-2026)\docs\images\image3updated.jpg" # Update this with your actual image path
     OUTPUT_EXCEL = "confidence_highlighted_output.xlsx"
     extract_to_excel(IMAGE_PATH, OUTPUT_EXCEL)
